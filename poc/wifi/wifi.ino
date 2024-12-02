@@ -16,6 +16,8 @@ void setup() {
   }
 
   Serial.println("Conectado a Wi-Fi");
+  Serial.print("Direccion IP: ");
+  Serial.println(WiFi.localIP());
 }
 
 void loop() {
