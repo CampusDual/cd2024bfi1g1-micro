@@ -108,7 +108,7 @@ void taskSensor(void* pvParameters) {
       Serial.print(humidity);
       Serial.println(" %");
 
-      String json_data = "{\"m\": \"" + mac_address + "\", \"t\": " + String(temperature, 2) + ", \"h\": " + String(humidity, 2) + "}";
+      String json_data =  "{ \"data\": { \"mac\": \"" + mac_address + "\", \"t\": " + String(temperature, 2) + ", \"h\": " + String(humidity, 2) + " } }";
       sendDataToCloud(json_data);
     } else {
       Serial.println("Error al leer datos del sensor.");
