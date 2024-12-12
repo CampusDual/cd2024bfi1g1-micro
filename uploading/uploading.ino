@@ -1,17 +1,58 @@
+#include <WiFi.h>
 #include <Wire.h>
 #include <SparkFun_SHTC3.h>
-#include <WiFi.h>
 #include <HTTPClient.h>
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_system.h"
 
+#define portTICK_PERIOD_MS ((TickType_t)(1000 / configTICK_RATE_HZ))
+
 SHTC3 shtc3;
-const String cloud_url = "https://webhook.site/0abb401a-943c-4a56-a163-8bdb6421be67";
+const String cloud_url = "URLservidor";
 TaskHandle_t taskHandleSensor;
+TickType_t xDelay = 20000 / portTICK_PERIOD_MS;
 
 char ssid[50] = {0};
 char password[50] = {0};
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+
+  initNVS();
+
+  if (strlen(ssid) == 0 || strlen(password) == 0) {
+    initWiFi();
+  } else {
+    WiFi.begin(ssid, password);
+    Serial.println("Conectando a WiFi...");
+    unsigned long startAttemptTime = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 30000) {
+      delay(1000);
+      Serial.print(".");
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\Conectado a WiFi!");
+    } else {
+      Serial.println("\No se pudo conectar a WiFi.");
+    }
+  }
+
+  if (shtc3.begin() != SHTC3_Status_Nominal) {
+    Serial.println("Error al inicializar el sensor.");
+    while (1);
+  }
+  Serial.println("Sensor inicializado.");
+
+  if (xTaskCreate(taskSensor, "TaskSensor", 2048, NULL, 1, &taskHandleSensor) != pdPASS) {
+    Serial.println("Error al crear la tarea del sensor.");
+    while (1);
+  }
+}
+
+void loop() {
+}
 
 void initNVS() {
   esp_err_t err = nvs_flash_init();
@@ -51,21 +92,6 @@ void saveCredentials(const char* ssid, const char* password) {
   }
 }
 
-void clearCredentials() {
-  nvs_handle_t my_handle;
-  esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
-
-  if (err == ESP_OK) {
-    nvs_erase_key(my_handle, "ssid");
-    nvs_erase_key(my_handle, "password");
-
-    if (nvs_commit(my_handle) == ESP_OK) {
-      Serial.println("Credenciales borradas exitosamente.");
-    }
-    nvs_close(my_handle);
-  }
-}
-
 void initWiFi() {
   Serial.println("Introduce el nombre de la red WiFi (SSID):");
   while (Serial.available() == 0);
@@ -86,38 +112,37 @@ void initWiFi() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nConectado a WiFi!");
+    Serial.println("\Conectado a WiFi!");
   } else {
-    Serial.println("\nNo se pudo conectar a WiFi.");
+    Serial.println("\No se pudo conectar a WiFi.");
   }
 }
 
-void taskSensor(void* pvParameters) {
-  while (1) {
-    if (shtc3.update() == SHTC3_Status_Nominal) {
-      float temperature = shtc3.toDegC();
-      float humidity = shtc3.toPercent();
+String takeReadings() {
+  if (shtc3.update() == SHTC3_Status_Nominal) {
+    float temperature = shtc3.toDegC();
+    float humidity = shtc3.toPercent();
 
-      String mac_address = WiFi.macAddress();
+    String mac_address = WiFi.macAddress();
 
-      Serial.print("Temperatura: ");
-      Serial.print(temperature);
-      Serial.println(" °C");
+    Serial.print("Temperatura: ");
+    Serial.print(temperature);
+    Serial.println(" °C");
 
-      Serial.print("Humedad: ");
-      Serial.print(humidity);
-      Serial.println(" %");
+    Serial.print("Humedad: ");
+    Serial.print(humidity);
+    Serial.println(" %");
 
-      String json_data =  "{ \"data\": { \"DEV_MAC\": \"" + mac_address + "\", \"ME_TEMP\": " + String(temperature, 2) + ", \"ME_HUMIDITY\": " + String(humidity, 2) + " } }";
-      sendDataToCloud(json_data);
-    } else {
-      Serial.println("Error al leer datos del sensor.");
-    }
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    return "{ \"data\": { \"DEV_MAC\": \"" + mac_address + "\", \"ME_TEMP\": " + String(temperature, 2) + ", \"ME_HUMIDITY\": " + String(humidity, 2) + " } }";
+  } else {
+    Serial.println("Error al leer datos del sensor.");
+    return "";
   }
 }
 
 void sendDataToCloud(String json_data) {
+  if (json_data.isEmpty()) return;
+
   HTTPClient http;
   http.begin(cloud_url);
   http.addHeader("Content-Type", "application/json");
@@ -133,41 +158,10 @@ void sendDataToCloud(String json_data) {
   http.end();
 }
 
-void setup() {
-  Serial.begin(115200);
-  Wire.begin();
-
-  initNVS();
-
-  if (strlen(ssid) == 0 || strlen(password) == 0) {
-    initWiFi();
-  } else {
-    WiFi.begin(ssid, password);
-    Serial.println("Conectando a WiFi...");
-    unsigned long startAttemptTime = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 30000) {
-      delay(1000);
-      Serial.print(".");
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nConectado a WiFi!");
-    } else {
-      Serial.println("\nNo se pudo conectar a WiFi.");
-    }
+void taskSensor(void* pvParameters) {
+  while (1) {
+    String json_data = takeReadings();
+    sendDataToCloud(json_data);
+    vTaskDelay(xDelay);
   }
-
-  if (shtc3.begin() != SHTC3_Status_Nominal) {
-    Serial.println("Error al inicializar el sensor.");
-    while (1);
-  }
-  Serial.println("Sensor inicializado.");
-
-  if (xTaskCreate(taskSensor, "TaskSensor", 2048, NULL, 1, &taskHandleSensor) != pdPASS) {
-    Serial.println("Error al crear la tarea del sensor.");
-    while (1);
-  }
-}
-
-void loop() {
-    delay(1000);
 }
