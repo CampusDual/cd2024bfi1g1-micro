@@ -20,7 +20,7 @@ WiFiManager wm; // Crear una instancia de WiFiManager
 
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   Wire.begin();
 
   
